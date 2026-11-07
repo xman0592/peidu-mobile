@@ -31,6 +31,16 @@
   let meterRAF = null;
   let listenTimer = null;
   let listenStart = 0;
+  let useVosk = false;
+  try { useVosk = localStorage.getItem("peidu-use-vosk") === "1"; } catch (e) {}
+  let voskModel = null;
+  let voskRecognizer = null;
+  let voskNode = null;
+  let voskCtx = null;
+  let voskStream = null;
+  let voskSilence = 0;
+  let voskGotText = false;
+  let voskTimer = null;
 
   /* ---------- 存储 ---------- */
   function loadStore() {
@@ -142,9 +152,10 @@
       // 兜底：有些安卓浏览器 onend 不触发，这里和手动停止都会收尾
       const has = finishListening("");
       if (!has) {
-        // 浏览器一个字的转写都没吐出来：多半是识别服务不通，直接切输入框
+        // 浏览器一个字的转写都没吐出来：多半是识别服务不通，给离线识别入口
         showInputFallback();
-        toast("浏览器没识别出文字，请点输入框，用键盘上的麦克风键说话", 3600);
+        $("rowOffline").style.display = "flex";
+        toast("浏览器识别不通，可点「改用离线识别」，或直接在输入框用键盘麦克风", 4200);
       }
     };
     return r;
@@ -241,6 +252,7 @@
     hintLevel = 0;
     stopMeter();
     hideSubmitRow();
+    $("rowOffline").style.display = "none";
     $("verdictCard").classList.remove("show");
     $("hintCard").classList.remove("show");
     $("answerBox").style.display = "none";
@@ -336,10 +348,134 @@
     finishListening(msg || "");
   }
 
+  /* ---------- 离线识别（Vosk，手机本地跑，不联网） ---------- */
+  async function startVoskListening() {
+    if (recognizing) { stopVoskListening(); return; }
+    if (typeof Vosk === "undefined") {
+      toast("离线识别组件没加载，请刷新页面重试", 3200);
+      return;
+    }
+    answerText = "";
+    lastInterim = "";
+    showAnswer("");
+    hideSubmitRow();
+    $("rowOffline").style.display = "none";
+    recognizing = true;
+    setRecordBtn(true);
+    $("qHint").textContent = "离线识别准备中…首次要下载约 40MB 模型，可能要半分钟。";
+
+    if (!voskModel) {
+      try {
+        voskModel = await Vosk.createModel("model.tar.gz");
+      } catch (e) {
+        recognizing = false;
+        setRecordBtn(false);
+        toast("离线模型加载失败，请连 WiFi 后重试", 4200);
+        return;
+      }
+    }
+    if (!recognizing) return;
+
+    $("qHint").textContent = "离线识别中：请说话，说完会自动停。";
+    try {
+      voskStream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+      });
+    } catch (e) {
+      recognizing = false;
+      setRecordBtn(false);
+      toast("麦克风打不开，请允许权限", 3200);
+      return;
+    }
+    if (!recognizing) {
+      voskStream.getTracks().forEach(function (t) { t.stop(); });
+      voskStream = null;
+      return;
+    }
+
+    voskCtx = new (window.AudioContext || window.webkitAudioContext)();
+    voskRecognizer = new voskModel.KaldiRecognizer(16000);
+    voskGotText = false;
+    voskSilence = 0;
+
+    voskRecognizer.on("result", function (m) {
+      const t = ((m.result && m.result.text) || "").trim();
+      if (t) {
+        answerText = (answerText + " " + t).trim();
+        voskGotText = true;
+        showAnswer(answerText);
+      }
+    });
+    voskRecognizer.on("partialresult", function (m) {
+      const p = ((m.result && m.result.partial) || "").trim();
+      if (p) {
+        voskGotText = true;
+        showAnswer((answerText + " " + p).trim());
+      }
+    });
+
+    voskNode = voskCtx.createScriptProcessor(4096, 1, 1);
+    voskNode.onaudioprocess = function (e) {
+      if (!recognizing) return;
+      try { voskRecognizer.acceptWaveform(e.inputBuffer); } catch (err) {}
+      const data = e.inputBuffer.getChannelData(0);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+      const rms = Math.sqrt(sum / data.length);
+      $("micLevel").style.width = Math.min(100, Math.round(rms * 700)) + "%";
+      if (rms > 0.015) voskSilence = 0;
+      else voskSilence += data.length / voskCtx.sampleRate;
+      if (voskGotText && voskSilence > 1.6) stopVoskListening();
+    };
+    const src = voskCtx.createMediaStreamSource(voskStream);
+    src.connect(voskNode);
+    voskNode.connect(voskCtx.destination);
+    $("micLabel").classList.add("show");
+    $("micMeter").classList.add("show");
+    if (voskCtx.state === "suspended") { try { await voskCtx.resume(); } catch (e) {} }
+
+    if (voskTimer) clearTimeout(voskTimer);
+    voskTimer = setTimeout(function () {
+      if (recognizing) stopVoskListening("离线识别超时");
+    }, 60000);
+  }
+
+  function stopVoskListening(msg) {
+    if (voskTimer) { clearTimeout(voskTimer); voskTimer = null; }
+    recognizing = false;
+    setRecordBtn(false);
+    $("micMeter").classList.remove("show");
+    $("micLabel").classList.remove("show");
+    $("micLevel").style.width = "0";
+    try { if (voskRecognizer) voskRecognizer.retrieveFinalResult(); } catch (e) {}
+    setTimeout(function () {
+      try { if (voskRecognizer) voskRecognizer.remove(); } catch (e) {}
+      voskRecognizer = null;
+      if (voskNode) { try { voskNode.disconnect(); } catch (e) {} voskNode = null; }
+      if (voskCtx) { try { voskCtx.close(); } catch (e) {} voskCtx = null; }
+      if (voskStream) { voskStream.getTracks().forEach(function (t) { t.stop(); }); voskStream = null; }
+      if (answerText.trim()) {
+        showAnswer(answerText);
+        showSubmitRow();
+      } else {
+        toast(msg || "没听到内容，请再说一次", 2600);
+      }
+    }, 500);
+  }
+
   function startAnswer() {
     stopSpeak();
-    if (recognizing) { stopRecognizing(); return; }
-    if (!recog) { showInputFallback(); return; }
+    if (recognizing) {
+      if (useVosk) stopVoskListening();
+      else stopRecognizing();
+      return;
+    }
+    if (useVosk) { startVoskListening(); return; }
+    if (!recog) {
+      $("rowOffline").style.display = "flex";
+      showInputFallback();
+      return;
+    }
     answerText = "";
     lastInterim = "";
     showAnswer("");
@@ -608,6 +744,8 @@
       $("speechWarn").textContent =
         "当前浏览器不支持语音识别（建议安卓用 Edge 或 Chrome）。仍可正常使用：点「开始回答」后，用键盘上的麦克风键说话。";
       $("deviceNote").textContent = "提示：装 Edge 浏览器，语音识别成功率最高。";
+    } else if (useVosk) {
+      $("deviceNote").textContent = "离线识别已开启：手机本地识别，不联网。首次加载模型约半分钟。";
     } else {
       $("deviceNote").textContent = "语音识别已就绪。房间保持安静，离手机近一点。";
     }
@@ -623,6 +761,13 @@
       startAnswer();
     };
     $("btnNext").onclick = nextQuestion;
+    $("btnOffline").onclick = function () {
+      try { localStorage.setItem("peidu-use-vosk", "1"); } catch (e) {}
+      useVosk = true;
+      $("rowOffline").style.display = "none";
+      toast("已切换离线识别，首次加载模型稍等", 3000);
+      startVoskListening();
+    };
     $("btnHintRetry").onclick = function () {
       $("hintCard").classList.remove("show");
       startAnswer();

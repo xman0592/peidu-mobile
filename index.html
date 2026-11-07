@@ -160,6 +160,9 @@
       <div class="mic-label" id="micLabel">🎤 麦克风正在收音，说话时绿色条会动</div>
       <div class="mic-meter" id="micMeter"><i id="micLevel"></i></div>
       <textarea id="answerInput" placeholder="点这里，用键盘上的麦克风键说话；也可以直接打字" style="display:none"></textarea>
+      <div class="row" id="rowOffline" style="display:none">
+        <button class="btn ghost" id="btnOffline">改用离线识别（首次下载约 40MB）</button>
+      </div>
 
       <div class="row">
         <button class="btn" id="btnRecord">开始回答</button>
@@ -203,7 +206,8 @@
 
   <div class="toast" id="toast"></div>
 
+<script defer src="vosk.js?v=1"></script>
 <script src="data.js?v=1"></script>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
