@@ -23,6 +23,7 @@
   let recognizing = false;
   let lastSpoken = "";
   let lastInterim = "";
+  let recogTimer = null;
 
   /* ---------- 存储 ---------- */
   function loadStore() {
@@ -117,8 +118,6 @@
       showAnswer(answerText + (interim ? interim : ""));
     };
     r.onerror = function (e) {
-      recognizing = false;
-      setRecordBtn(false);
       const map = {
         "not-allowed": "麦克风权限被拒绝，请在浏览器设置里允许",
         "service-not-allowed": "语音识别服务不可用，改用输入框",
@@ -127,20 +126,14 @@
         "aborted": "",
       };
       const msg = map[e.error] !== undefined ? map[e.error] : "语音识别出错：" + e.error;
-      if (msg) toast(msg, 2600);
+      finishListening(msg);
       if (e.error === "network" || e.error === "service-not-allowed" || e.error === "not-allowed") {
         showInputFallback();
-      } else if (e.error === "no-speech") {
-        // 留在录音界面，允许重试
       }
     };
     r.onend = function () {
-      recognizing = false;
-      setRecordBtn(false);
-      if (!answerText.trim() && lastInterim.trim()) answerText = lastInterim.trim();
-      lastInterim = "";
-      if (answerText.trim()) showAnswer(answerText);
-      if (answerText.trim()) showSubmitRow();
+      // 兜底：有些安卓浏览器 onend 不触发，这里和手动停止都会收尾
+      finishListening("");
     };
     return r;
   }
@@ -148,7 +141,8 @@
   function setRecordBtn(on) {
     const b = $("btnRecord");
     b.classList.toggle("recording", on);
-    b.textContent = on ? "正在听…点一下停" : "开始回答";
+    if (on) b.textContent = "正在听…点一下停";
+    else b.textContent = recog ? "开始回答" : "用键盘语音输入";
   }
 
   function showAnswer(text) {
@@ -253,11 +247,33 @@
     speak($("qText").textContent);
   }
 
+  function finishListening(msg) {
+    if (recogTimer) { clearTimeout(recogTimer); recogTimer = null; }
+    recognizing = false;
+    setRecordBtn(false);
+    if (!answerText.trim() && lastInterim.trim()) answerText = lastInterim.trim();
+    lastInterim = "";
+    if (answerText.trim()) {
+      showAnswer(answerText);
+      showSubmitRow();
+    } else if (msg) {
+      toast(msg, 2400);
+    }
+  }
+
+  function stopRecognizing(msg) {
+    const was = recognizing;
+    if (recogTimer) { clearTimeout(recogTimer); recogTimer = null; }
+    recognizing = false;
+    setRecordBtn(false);
+    if (was && recog) { try { recog.abort(); } catch (e) {} }
+    finishListening(msg || "");
+  }
+
   function startAnswer() {
     stopSpeak();
-    if (recognizing) { try { recog.stop(); } catch (e) {} return; }
-    if (!recog) showInputFallback();
-    if (!recog) return;
+    if (recognizing) { stopRecognizing(); return; }
+    if (!recog) { showInputFallback(); return; }
     answerText = "";
     lastInterim = "";
     showAnswer("");
@@ -268,10 +284,14 @@
       recog.start();
       recognizing = true;
       setRecordBtn(true);
+      if (recogTimer) clearTimeout(recogTimer);
+      // 有些浏览器一直不结束，20 秒强制收尾
+      recogTimer = setTimeout(function () {
+        if (recognizing) stopRecognizing("识别超时，请再试一次");
+      }, 20000);
     } catch (e) {
       recognizing = false;
       setRecordBtn(false);
-      toast("启动识别失败，点这里改用输入框");
       showInputFallback();
     }
   }
