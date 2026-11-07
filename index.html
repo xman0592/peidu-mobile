@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#1f6f5c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>陪读 · 语音问答</title>
+<style>
+  :root {
+    --bg: #f5f3ee;
+    --card: #fffdf9;
+    --ink: #25312d;
+    --muted: #7d8a84;
+    --line: #e3ded3;
+    --brand: #1f6f5c;
+    --brand-soft: #e3f0eb;
+    --warn: #b4761f;
+    --bad: #b0453a;
+    --ok: #1f7a4d;
+    --radius: 18px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    padding: env(safe-area-inset-top) 16px calc(env(safe-area-inset-bottom) + 20px);
+    max-width: 640px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+  }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 14px 2px 8px; }
+  h1 { font-size: 19px; margin: 0; letter-spacing: .5px; }
+  .badge { font-size: 12px; color: var(--muted); background: #ece8df; padding: 3px 9px; border-radius: 999px; }
+  .subjects { display: flex; gap: 8px; margin: 6px 0 14px; }
+  .subjects button {
+    flex: 1; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    padding: 9px 0; border-radius: 12px; font-size: 15px; font-weight: 600;
+  }
+  .subjects button.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(60, 50, 30, .04);
+  }
+  .meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 8px; flex-wrap: wrap; }
+  .pill { padding: 2px 8px; border-radius: 999px; background: #eee9dd; }
+  .pill.good { background: var(--brand-soft); color: var(--brand); }
+  .pill.hot { background: #fbe9d6; color: var(--warn); }
+  .question { font-size: 20px; line-height: 1.55; font-weight: 650; margin: 4px 0 14px; }
+  .hint { font-size: 14px; color: var(--muted); margin-bottom: 12px; }
+  .answer-box {
+    min-height: 76px; border: 1.5px dashed var(--line); border-radius: 14px;
+    padding: 10px 12px; font-size: 16px; color: var(--ink); background: #fbf9f4;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .answer-box.empty { color: #a8b1ac; }
+  textarea {
+    width: 100%; min-height: 76px; border: 1.5px solid var(--line); border-radius: 14px;
+    padding: 10px 12px; font: inherit; color: var(--ink); background: #fbf9f4; resize: vertical;
+  }
+  textarea:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+
+  .row { display: flex; gap: 10px; margin-top: 12px; }
+  .btn {
+    flex: 1; border: 0; border-radius: 14px; padding: 13px 10px; font-size: 16px; font-weight: 650;
+    background: var(--brand); color: #fff;
+  }
+  .btn.secondary { background: #ece8df; color: var(--ink); }
+  .btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); }
+  .btn:disabled { opacity: .45; }
+  .btn.recording { background: var(--bad); }
+  .btn.recording::after {
+    content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: #fff; margin-left: 8px; animation: pulse 1s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+  .verdict { display: none; }
+  .verdict.show { display: block; }
+  .verdict-head { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .verdict-text { font-size: 14px; color: var(--muted); margin-bottom: 10px; }
+  .keys { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+  .key { font-size: 13px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .key.hit { background: var(--brand-soft); border-color: #bfe0d5; color: var(--brand); font-weight: 600; }
+  .key.miss { background: #fbeceb; border-color: #f0cfcb; color: var(--bad); }
+  .answer-ref { font-size: 15px; background: #f6f2e8; border-radius: 12px; padding: 10px 12px; color: #4a5650; }
+  .answer-ref b { color: var(--ink); }
+  .override { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 2px; font-size: 12px; color: var(--muted); }
+  .override button {
+    border: 1px solid var(--line); background: transparent; color: var(--muted);
+    padding: 4px 10px; border-radius: 999px; font-size: 12px;
+  }
+  .override button.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+  .progress { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin: 4px 2px 10px; }
+  .bar { flex: 1; height: 6px; background: #e6e1d6; border-radius: 999px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--brand); transition: width .3s; }
+
+  .screen { display: none; }
+  .screen.active { display: block; }
+  .start-card { text-align: center; padding: 26px 18px; }
+  .start-card p { color: var(--muted); font-size: 14px; margin: 6px 0 18px; }
+  .warn-note { font-size: 12.5px; color: var(--warn); background: #fdf3e6; border-radius: 12px; padding: 9px 12px; margin-top: 10px; display: none; }
+  .warn-note.show { display: block; }
+  .toast {
+    position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 16px); transform: translateX(-50%);
+    background: #2b3531; color: #fff; padding: 9px 16px; border-radius: 999px; font-size: 14px;
+    opacity: 0; pointer-events: none; transition: opacity .25s; max-width: 90vw; text-align: center;
+  }
+  .toast.show { opacity: .95; }
+  .footer-note { text-align: center; font-size: 12px; color: var(--muted); margin-top: 8px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>陪读 · 语音问答</h1>
+    <span class="badge" id="examBadge">八上期中</span>
+  </header>
+
+  <div class="subjects" id="subjectBar"></div>
+
+  <section class="screen active" id="screenStart">
+    <div class="card start-card">
+      <div class="question" id="startTitle">准备开始</div>
+      <p id="startDesc">系统会念题，姐姐口头回答，自动判分。每轮 10 题，约 20 分钟。</p>
+      <div class="row">
+        <button class="btn" id="btnStart">开始本轮</button>
+      </div>
+      <div class="warn-note" id="speechWarn"></div>
+    </div>
+    <div class="card">
+      <div class="meta"><span class="pill" id="statAsked">已练 0 题</span><span class="pill good" id="statOk">掌握 0</span><span class="pill hot" id="statDue">待复习 0</span></div>
+      <div class="footer-note" id="deviceNote"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="screenQuiz">
+    <div class="progress"><span id="progressText">1 / 10</span><div class="bar"><i id="progressBar"></i></div></div>
+
+    <div class="card">
+      <div class="meta" id="qMeta"></div>
+      <div class="question" id="qText"></div>
+      <div class="hint" id="qHint">点「开始回答」，说完会自动停。</div>
+
+      <div class="answer-box empty" id="answerBox">等待回答…</div>
+      <textarea id="answerInput" placeholder="也可以点这里，用键盘上的语音键说话，或直接打字" style="display:none"></textarea>
+
+      <div class="row">
+        <button class="btn" id="btnRecord">开始回答</button>
+        <button class="btn secondary" id="btnReplay">再念一遍</button>
+      </div>
+      <div class="row" id="rowSubmit" style="display:none">
+        <button class="btn" id="btnSubmit">判分</button>
+        <button class="btn ghost" id="btnRetry">重说</button>
+      </div>
+    </div>
+
+    <div class="card verdict" id="verdictCard">
+      <div class="verdict-head" id="verdictHead"></div>
+      <div class="verdict-text" id="verdictText"></div>
+      <div class="keys" id="keyList"></div>
+      <div class="answer-ref" id="answerRef"></div>
+      <div class="override" id="overrideRow">
+        <span>判错了？</span>
+        <button data-v="掌握">掌握</button>
+        <button data-v="模糊">模糊</button>
+        <button data-v="半对">半对</button>
+        <button data-v="错">错</button>
+      </div>
+      <div class="row">
+        <button class="btn" id="btnNext">下一题</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
