@@ -129,7 +129,7 @@
         "not-allowed": "麦克风权限被拒绝，请在浏览器设置里允许",
         "service-not-allowed": "语音识别服务不可用，改用输入框",
         "network": "语音识别连不上网，改用输入框的语音键",
-        "no-speech": "没听到声音，再说一次",
+        "no-speech": "",
         "aborted": "",
       };
       const msg = map[e.error] !== undefined ? map[e.error] : "语音识别出错：" + e.error;
@@ -140,7 +140,12 @@
     };
     r.onend = function () {
       // 兜底：有些安卓浏览器 onend 不触发，这里和手动停止都会收尾
-      finishListening("没听到内容，请再说一次");
+      const has = finishListening("");
+      if (!has) {
+        // 浏览器一个字的转写都没吐出来：多半是识别服务不通，直接切输入框
+        showInputFallback();
+        toast("浏览器没识别出文字，请点输入框，用键盘上的麦克风键说话", 3600);
+      }
     };
     return r;
   }
@@ -156,6 +161,9 @@
     const box = $("answerBox");
     box.textContent = text || "等待回答…";
     box.classList.toggle("empty", !text);
+    // 输入框始终可用；识别结果同步过去，她也能改
+    const input = $("answerInput");
+    if (document.activeElement !== input) input.value = text || "";
   }
 
   function showInputFallback() {
@@ -163,7 +171,7 @@
     const box = $("answerBox");
     box.style.display = "none";
     input.style.display = "block";
-    input.value = answerText;
+    if (!input.value.trim()) input.value = answerText;
     input.focus();
     $("qHint").textContent = "浏览器语音识别不可用：点键盘上的麦克风键说话，或直接打字。";
     input.oninput = function () {
@@ -235,11 +243,11 @@
     hideSubmitRow();
     $("verdictCard").classList.remove("show");
     $("hintCard").classList.remove("show");
-    $("answerBox").style.display = "block";
-    $("answerInput").style.display = "none";
+    $("answerBox").style.display = "none";
+    $("answerInput").style.display = "block";
     $("answerInput").value = "";
     showAnswer("");
-    $("qHint").textContent = "点「开始回答」，说完会自动停。";
+    $("qHint").textContent = "点「开始回答」说话；识别不出字就直接点下面的输入框，用键盘上的麦克风键。";
     $("btnRecord").disabled = false;
 
     $("qMeta").innerHTML =
@@ -313,9 +321,10 @@
     if (answerText.trim()) {
       showAnswer(answerText);
       showSubmitRow();
-    } else if (msg) {
-      toast(msg, 2400);
+      return true;
     }
+    if (msg) toast(msg, 2400);
+    return false;
   }
 
   function stopRecognizing(msg) {
@@ -335,8 +344,7 @@
     lastInterim = "";
     showAnswer("");
     hideSubmitRow();
-    $("answerBox").style.display = "block";
-    $("answerInput").style.display = "none";
+    $("answerInput").style.display = "block";
     listenStart = Date.now();
     startMeter();
     if (listenTimer) clearInterval(listenTimer);
