@@ -24,6 +24,13 @@
   let lastSpoken = "";
   let lastInterim = "";
   let recogTimer = null;
+  let hintLevel = 0;
+  let mediaStream = null;
+  let audioCtx = null;
+  let analyser = null;
+  let meterRAF = null;
+  let listenTimer = null;
+  let listenStart = 0;
 
   /* ---------- 存储 ---------- */
   function loadStore() {
@@ -133,7 +140,7 @@
     };
     r.onend = function () {
       // 兜底：有些安卓浏览器 onend 不触发，这里和手动停止都会收尾
-      finishListening("");
+      finishListening("没听到内容，请再说一次");
     };
     return r;
   }
@@ -223,8 +230,11 @@
 
     answerText = "";
     currentVerdict = "";
+    hintLevel = 0;
+    stopMeter();
     hideSubmitRow();
     $("verdictCard").classList.remove("show");
+    $("hintCard").classList.remove("show");
     $("answerBox").style.display = "block";
     $("answerInput").style.display = "none";
     $("answerInput").value = "";
@@ -247,8 +257,55 @@
     speak($("qText").textContent);
   }
 
+  function stopMeter() {
+    if (meterRAF) { cancelAnimationFrame(meterRAF); meterRAF = null; }
+    if (listenTimer) { clearInterval(listenTimer); listenTimer = null; }
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(function (t) { t.stop(); });
+      mediaStream = null;
+    }
+    if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+    analyser = null;
+    $("micMeter").classList.remove("show");
+    $("micLabel").classList.remove("show");
+    $("micLabel").textContent = "🎤 麦克风正在收音，说话时绿色条会动";
+    $("micLevel").style.width = "0";
+  }
+
+  function startMeter() {
+    stopMeter();
+    $("micLabel").classList.add("show");
+    $("micMeter").classList.add("show");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      if (!recognizing) {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        return;
+      }
+      mediaStream = stream;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = audioCtx.createMediaStreamSource(stream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      src.connect(analyser);
+      const buf = new Float32Array(analyser.fftSize);
+      (function loop() {
+        if (!analyser) return;
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        const rms = Math.sqrt(sum / buf.length);
+        $("micLevel").style.width = Math.min(100, Math.round(rms * 700)) + "%";
+        meterRAF = requestAnimationFrame(loop);
+      })();
+    }).catch(function () {
+      $("micLabel").textContent = "🎤 麦克风没打开，请在浏览器设置里允许";
+    });
+  }
+
   function finishListening(msg) {
     if (recogTimer) { clearTimeout(recogTimer); recogTimer = null; }
+    stopMeter();
     recognizing = false;
     setRecordBtn(false);
     if (!answerText.trim() && lastInterim.trim()) answerText = lastInterim.trim();
@@ -280,6 +337,14 @@
     hideSubmitRow();
     $("answerBox").style.display = "block";
     $("answerInput").style.display = "none";
+    listenStart = Date.now();
+    startMeter();
+    if (listenTimer) clearInterval(listenTimer);
+    listenTimer = setInterval(function () {
+      if (!recognizing) { clearInterval(listenTimer); listenTimer = null; return; }
+      const sec = Math.floor((Date.now() - listenStart) / 1000);
+      $("qHint").textContent = "正在听 " + sec + " 秒…说完会自动停，也可以点按钮停。";
+    }, 500);
     try {
       recog.start();
       recognizing = true;
@@ -292,6 +357,7 @@
     } catch (e) {
       recognizing = false;
       setRecordBtn(false);
+      stopMeter();
       showInputFallback();
     }
   }
@@ -322,12 +388,78 @@
     if (!answerText.trim() && $("answerInput").style.display !== "none") {
       answerText = $("answerInput").value;
     }
-    if (!answerText.trim()) { toast("还没听到回答"); return; }
+    const text = (answerText || "").trim();
+    if (!text) { toast("还没听到回答"); return; }
+    const n = norm(text);
+
+    // 口令优先
+    if (/跳过/.test(n)) { skipQuestion(); return; }
+    if (/再念一遍|再说一遍|重念|没听清/.test(n)) {
+      speak($("qText").textContent);
+      toast("再听一遍，听完点「开始回答」", 2600);
+      return;
+    }
+    if (/提示/.test(n)) { showHint(); return; }
+    const stuck = /^(我)?(不会|不知道|不记得|忘了|不懂|不明白|想不起来|没学过)/.test(n) ||
+      (/不会|不知道/.test(n) && n.length <= 14);
+    if (stuck) { showHint(); return; }
+
     const p = queue[qIndex];
-    const result = judge(answerText, p.keys || []);
-    currentVerdict = result.verdict;
+    const result = judge(text, p.keys || []);
+    let verdict = result.verdict;
+    // 用过提示就降档，不能算“掌握”
+    if (hintLevel >= 2 && verdict === "掌握") verdict = "半对";
+    else if (hintLevel >= 1 && verdict === "掌握") verdict = "模糊";
+    result.verdict = verdict;
+    currentVerdict = verdict;
     renderVerdict(p, result);
-    recordResult(p, answerText, result.verdict);
+    recordResult(p, text, verdict);
+    $("hintCard").classList.remove("show");
+  }
+
+  function hintFor(p, level) {
+    const keys = p.keys || [];
+    if (level === 0) {
+      return "这题考的是「" + (p.chapter || "") + "」。先别急着答全，说说你记得哪些关键词？";
+    }
+    if (level === 1) {
+      const k = keys.slice(0, Math.max(2, Math.ceil(keys.length / 3)));
+      return "给你几个关键词：" + k.join("、") + "。围着它们把答案补全。";
+    }
+    if (level === 2) {
+      const k = keys.slice(0, Math.ceil(keys.length / 2));
+      return "再给一半要点：" + k.join("、") + "。剩下的呢？";
+    }
+    return "参考答案：" + (p.note || "（无）");
+  }
+
+  function showHint(nextLevel) {
+    const p = queue[qIndex];
+    if (!p) return;
+    hintLevel = typeof nextLevel === "number" ? nextLevel : Math.min(hintLevel + 1, 3);
+    const isAnswer = hintLevel >= 3;
+    $("hintHead").textContent = isAnswer ? "📖 参考答案" : "💡 提示 " + (hintLevel + 1);
+    $("hintText").textContent = hintFor(p, hintLevel);
+    $("btnHintMore").style.display = isAnswer ? "none" : "";
+    $("rowHintNext").style.display = isAnswer ? "flex" : "none";
+    $("hintCard").classList.add("show");
+    $("verdictCard").classList.remove("show");
+    hideSubmitRow();
+    answerText = "";
+    showAnswer("");
+    speak($("hintText").textContent);
+    $("hintCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function skipQuestion() {
+    const p = queue[qIndex];
+    if (!p) return;
+    recordResult(p, "跳过", "错");
+    $("hintCard").classList.remove("show");
+    $("verdictCard").classList.remove("show");
+    hideSubmitRow();
+    toast("这题跳过，下次先练", 1600);
+    nextQuestion();
   }
 
   function renderVerdict(p, r) {
@@ -483,6 +615,17 @@
       startAnswer();
     };
     $("btnNext").onclick = nextQuestion;
+    $("btnHintRetry").onclick = function () {
+      $("hintCard").classList.remove("show");
+      startAnswer();
+    };
+    $("btnHintMore").onclick = function () { showHint(); };
+    $("btnHintNext").onclick = function () {
+      const p = queue[qIndex];
+      if (p) recordResult(p, "看答案：" + (p.note || ""), "半对");
+      $("hintCard").classList.remove("show");
+      nextQuestion();
+    };
     $("overrideRow").onclick = function (e) {
       const v = e.target.dataset && e.target.dataset.v;
       if (v) overrideVerdict(v);

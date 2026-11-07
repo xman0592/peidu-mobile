@@ -97,6 +97,14 @@
     padding: 4px 10px; border-radius: 999px; font-size: 12px;
   }
   .override button.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .hint-card { display: none; border-color: #efd9b8; background: #fffaf0; }
+  .hint-card.show { display: block; }
+  .hint-card .verdict-head { color: #8a5a12; }
+  .mic-meter { height: 8px; background: #e6e1d6; border-radius: 999px; overflow: hidden; margin: 10px 0 2px; display: none; }
+  .mic-meter.show { display: block; }
+  .mic-meter i { display: block; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #6dbb9b, #1f6f5c); transition: width .08s linear; }
+  .mic-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: none; }
+  .mic-label.show { display: block; }
 
   .progress { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin: 4px 2px 10px; }
   .bar { flex: 1; height: 6px; background: #e6e1d6; border-radius: 999px; overflow: hidden; }
@@ -149,6 +157,8 @@
       <div class="hint" id="qHint">点「开始回答」，说完会自动停。</div>
 
       <div class="answer-box empty" id="answerBox">等待回答…</div>
+      <div class="mic-label" id="micLabel">🎤 麦克风正在收音，说话时绿色条会动</div>
+      <div class="mic-meter" id="micMeter"><i id="micLevel"></i></div>
       <textarea id="answerInput" placeholder="也可以点这里，用键盘上的语音键说话，或直接打字" style="display:none"></textarea>
 
       <div class="row">
@@ -177,11 +187,23 @@
         <button class="btn" id="btnNext">下一题</button>
       </div>
     </div>
+
+    <div class="card hint-card" id="hintCard">
+      <div class="verdict-head" id="hintHead">💡 提示</div>
+      <div class="verdict-text" id="hintText"></div>
+      <div class="row">
+        <button class="btn" id="btnHintRetry">再说一次</button>
+        <button class="btn secondary" id="btnHintMore">再提示一点</button>
+      </div>
+      <div class="row" id="rowHintNext" style="display:none">
+        <button class="btn" id="btnHintNext">下一题</button>
+      </div>
+    </div>
   </section>
 
   <div class="toast" id="toast"></div>
 
 <script src="data.js?v=1"></script>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
